@@ -25,7 +25,7 @@ func init() {
 func main() {
 	router := mux.NewRouter()
 	router.HandleFunc("/all", getAllUrls).Methods("GET")
-	router.HandleFunc("/", getUrlByUrl).Methods("GET")
+	router.HandleFunc("/", getLongUrlByUrl).Methods("GET")
 	router.HandleFunc("/", createUrl).Methods("POST")
 	router.HandleFunc("/{shortUrl}", deleteUrl).Methods("DELETE")
 

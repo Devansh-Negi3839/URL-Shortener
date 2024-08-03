@@ -47,7 +47,7 @@ func getAllUrls(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getUrlByUrl(w http.ResponseWriter, r *http.Request) {
+func getLongUrlByUrl(w http.ResponseWriter, r *http.Request) {
 	db = GetDB()
 	var url Url
 	if err := json.NewDecoder(r.Body).Decode(&url); err != nil {
@@ -57,21 +57,15 @@ func getUrlByUrl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate that at least one URL field is provided
-	if url.LongUrl == "" && url.ShortUrl == "" {
+	if url.ShortUrl == "" {
 		http.Error(w, "At least one URL is required to fetch the other", http.StatusBadRequest)
 		return
 	}
 
-	var query string
 	var args []interface{}
 
-	if url.ShortUrl != "" {
-		query = "SELECT short_url, long_url FROM urls WHERE short_url = ?"
-		args = append(args, url.ShortUrl)
-	} else if url.LongUrl != "" {
-		query = "SELECT short_url, long_url FROM urls WHERE long_url = ?"
-		args = append(args, url.LongUrl)
-	}
+	query := "SELECT short_url, long_url FROM urls WHERE short_url = ?"
+	args = append(args, url.ShortUrl)
 
 	row := db.QueryRow(query, args...)
 
@@ -96,42 +90,66 @@ func getUrlByUrl(w http.ResponseWriter, r *http.Request) {
 }
 
 func createUrl(w http.ResponseWriter, r *http.Request) {
-	db = GetDB()
+	db := GetDB()
 	var url Url
 	if err := json.NewDecoder(r.Body).Decode(&url); err != nil {
-		logrus.Error(err)
+		logrus.Error("Failed to decode JSON:", err)
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
 
-	// Validate LongUrl field
 	if url.LongUrl == "" {
 		http.Error(w, "Long URL is required", http.StatusBadRequest)
 		return
 	}
 
-	// Generate a short URL using hashUrl
-	shortUrl := hashUrl(url.LongUrl)
+	// Check if the LongUrl already exists in the database
+	var existingUrl Url
+	query := "SELECT short_url, long_url FROM urls WHERE long_url = ?"
+	row := db.QueryRow(query, url.LongUrl)
+	err := row.Scan(&existingUrl.ShortUrl, &existingUrl.LongUrl)
 
-	// Insert the new URL into the database
-	_, err := db.Exec("INSERT INTO urls (short_url, long_url) VALUES (?, ?)", shortUrl, url.LongUrl)
-	if err != nil {
-		logrus.Error(err)
+	if err == nil {
+		// If the URL exists, return the existing short URL
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(map[string]string{
+			"short_url": fmt.Sprintf("%s%s", baseShortUrl, existingUrl.ShortUrl),
+			"long_url":  existingUrl.LongUrl,
+		}); err != nil {
+			logrus.Error("Failed to encode JSON:", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	if err != sql.ErrNoRows {
+		// Handle SQL errors other than "no rows"
+		logrus.Error("Database query failed:", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
-	// Prepare the response
-	response := map[string]string{
-		"short_url": fmt.Sprintf("%s%s", baseShortUrl, shortUrl),
-		"long_url":  url.LongUrl,
+	// Generate a new short URL
+	shortUrl := hashUrl(url.LongUrl)
+
+	// Insert the new URL into the database
+	insertQuery := "INSERT INTO urls (short_url, long_url) VALUES (?, ?)"
+	_, err = db.Exec(insertQuery, shortUrl, url.LongUrl)
+	if err != nil {
+		logrus.Error("Failed to insert new URL:", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
 	}
 
-	// Return the short URL in the response
+	// Respond with the newly created short URL
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logrus.Error(err)
+	if err := json.NewEncoder(w).Encode(map[string]string{
+		"short_url": fmt.Sprintf("%s%s", baseShortUrl, shortUrl),
+		"long_url":  url.LongUrl,
+	}); err != nil {
+		logrus.Error("Failed to encode JSON:", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
 }
