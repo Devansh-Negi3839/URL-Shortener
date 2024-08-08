@@ -47,27 +47,14 @@ func getAllUrls(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getLongUrlByUrl(w http.ResponseWriter, r *http.Request) {
+func getLongUrlByShortUrl(w http.ResponseWriter, r *http.Request) {
 	db = GetDB()
-	var url Url
-	if err := json.NewDecoder(r.Body).Decode(&url); err != nil {
-		logrus.Error(err)
-		http.Error(w, "Bad Request", http.StatusBadRequest)
-		return
-	}
 
-	// Validate that at least one URL field is provided
-	if url.ShortUrl == "" {
-		http.Error(w, "At least one URL is required to fetch the other", http.StatusBadRequest)
-		return
-	}
-
-	var args []interface{}
+	shortUrl := mux.Vars(r)["shorturl"]
 
 	query := "SELECT short_url, long_url FROM urls WHERE short_url = ?"
-	args = append(args, url.ShortUrl)
 
-	row := db.QueryRow(query, args...)
+	row := db.QueryRow(query, shortUrl)
 
 	var result Url
 	err := row.Scan(&result.ShortUrl, &result.LongUrl)
@@ -76,17 +63,12 @@ func getLongUrlByUrl(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Not Found", http.StatusNotFound)
 			return
 		}
-		logrus.Error(err)
+		logrus.Println(err) // Use log.Println instead of logrus if you don't have logrus setup
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
-	// Return the result as JSON
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(result); err != nil {
-		logrus.Error(err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-	}
+	http.Redirect(w, r, result.LongUrl, http.StatusMovedPermanently)
 }
 
 func createUrl(w http.ResponseWriter, r *http.Request) {
